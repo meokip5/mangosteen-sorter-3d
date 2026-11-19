@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D CAD เครื่องคัดแยกมังคุด (Pi Camera + Arduino Cam 3 ตัว + สายพานสั้น 3 เส้น)</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Inter', 'Noto Sans Thai', sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    #viewport {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: grab;
+      touch-action: none;
+    }
+    #viewport:active { cursor: grabbing; }
+    .cad-panel {
+      background: rgba(15, 23, 42, 0.92);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(148, 163, 184, 0.22);
+    }
+    .btn-cad { transition: all 0.15s ease; }
+    .btn-cad.active {
+      background: #0284c7;
+      color: #ffffff;
+      border-color: #38bdf8;
+    }
+    .custom-scroll::-webkit-scrollbar { width: 5px; }
+    .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.35); border-radius: 999px; }
+  </style>
+</head>
+<body class="relative w-full h-full select-none">
+
+  <div id="canvas-wrap" class="relative w-full h-full">
+    <canvas id="viewport"></canvas>
+
+    <!-- Top Header Bar -->
+    <div class="cad-panel absolute top-3 left-3 right-3 md:right-auto rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-3 shadow-xl z-20">
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0"></span>
+          <h1 class="text-sm sm:text-base font-bold text-white truncate">3D CAD เครื่องคัดมังคุด แบบ B (ฉบับปรับปรุงล่าสุด)</h1>
+        </div>
+        <p class="text-[11px] sm:text-xs text-sky-300 mt-0.5 truncate">
+          สายพาน 1–2 สูงเท่ากัน (377 mm) · กล้อง Pi และ Arduino ×3 ติดด้านข้าง (เห็นผิวมังคุดไม่ติดขั้ว) · ไม่มีกรวยป้อน
+        </p>
+      </div>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button id="btn-save-png" type="button" class="btn-cad px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 border border-emerald-400 text-xs font-semibold text-white">
+          บันทึกรูป PNG (ส่ง LINE)
+        </button>
+        <button id="btn-toggle-panel" type="button" class="btn-cad px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-medium text-slate-200">
+          ซ่อนแผงควบคุม
+        </button>
+      </div>
+    </div>
+
+    <!-- Bottom Camera & Control Bar -->
+    <div class="cad-panel absolute bottom-3 left-3 rounded-xl p-1.5 flex flex-wrap items-center gap-1 shadow-xl z-20 max-w-[calc(100%-1.5rem)]">
+      <button id="view-iso" type="button" class="btn-cad active px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-200 hover:bg-slate-700 border border-transparent">Isometric</button>
+      <button id="view-side" type="button" class="btn-cad px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-200 hover:bg-slate-700 border border-transparent">ด้านข้าง</button>
+      <button id="view-top" type="button" class="btn-cad px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-200 hover:bg-slate-700 border border-transparent">ด้านบน</button>
+      <button id="view-front" type="button" class="btn-cad px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-200 hover:bg-slate-700 border border-transparent">ด้านหน้า</button>
+      <span class="w-px h-5 bg-slate-700 mx-0.5 hidden sm:inline-block"></span>
+      <button id="btn-zoom-out" type="button" class="btn-cad px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-600">− ซูมออก</button>
+      <button id="btn-zoom-in" type="button" class="btn-cad px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-600">+ ซูมเข้า</button>
+      <button id="btn-fit" type="button" class="btn-cad px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600">เห็นทั้งเครื่อง</button>
+      <button id="btn-pan-mode" type="button" class="btn-cad px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600">โหมด: หมุน</button>
+      <span class="w-px h-5 bg-slate-700 mx-0.5 hidden sm:inline-block"></span>
+      <button id="btn-sim-toggle" type="button" class="btn-cad px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400">หยุดจำลอง</button>
+      <button id="btn-hood-mode" type="button" class="btn-cad px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-600">ฮูด: โปร่งใส</button>
+    </div>
+
+    <!-- Simulation Live Telemetry Badge -->
+    <div id="sim-badge" class="cad-panel absolute bottom-16 sm:bottom-3 left-3 sm:left-auto sm:right-3 rounded-xl px-3 py-2 text-xs z-10 hidden lg:block">
+      <div class="text-slate-400 text-[10px] uppercase tracking-wider font-semibold">สถานะกล้องและสายพาน</div>
+      <div id="sim-status" class="text-emerald-300 font-medium mt-0.5">Pi Cam ตรวจสี + Arduino Cam ×3 ตรวจขนาด</div>
+    </div>
+
+    <!-- Right Collapsible CAD Inspector Drawer -->
+    <aside id="inspector-panel" class="cad-panel absolute top-16 right-3 bottom-16 w-72 sm:w-80 rounded-xl shadow-2xl z-20 flex flex-col overflow-hidden">
+      <div class="grid grid-cols-3 border-b border-slate-700/80 text-xs font-semibold">
+        <button id="tab-layers" type="button" class="py-2.5 text-center text-sky-400 border-b-2 border-sky-400 bg-slate-800/60">เลเยอร์ &amp; แชร์</button>
+        <button id="tab-specs" type="button" class="py-2.5 text-center text-slate-400 hover:text-slate-200 border-b-2 border-transparent">ขนาดชิ้นส่วน</button>
+        <button id="tab-notes" type="button" class="py-2.5 text-center text-slate-400 hover:text-slate-200 border-b-2 border-transparent">ระบบกล้อง</button>
+      </div>
+
+      <!-- Tab 1: Layers & Share/Export -->
+      <div id="pane-layers" class="p-3.5 overflow-y-auto custom-scroll flex-1 space-y-4 text-xs">
+        <div>
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">แสดง / ซ่อนชิ้นส่วน</div>
+          <div class="space-y-1.5">
+            <label class="flex items-center justify-between gap-2 cursor-pointer p-1.5 rounded-lg hover:bg-slate-800/70">
+              <span>โครงอลูมิเนียม 2020 (ขา 300 เท่ากัน)</span>
+              <input id="chk-frame" type="checkbox" checked class="accent-sky-500 w-4 h-4" />
+            </label>
+            <label class="flex items-center justify-between gap-2 cursor-pointer p-1.5 rounded-lg hover:bg-slate-800/70">
+              <span>สายพาน 1, 2 และผนังเลน</span>
+              <input id="chk-belts" type="checkbox" checked class="accent-sky-500 w-4 h-4" />
+            </label>
+            <label class="flex items-center justify-between gap-2 cursor-pointer p-1.5 rounded-lg hover:bg-slate-800/70">
+              <span>สายพานสั้น 3 เส้น (450 / 700 mm)</span>
+              <input id="chk-diverters" type="checkbox" checked class="accent-sky-500 w-4 h-4" />
+            </label>
+            <label class="flex items-center justify-between gap-2 cursor-pointer p-1.5 rounded-lg hover:bg-slate-800/70">
+              <span>ฮูดกันแสง 1 &amp; 2</span>
+              <input id="chk-hoods" type="checkbox" checked class="accent-sky-500 w-4 h-4" />
+            </label>
+            <label class="flex items-center justify-between gap-2 cursor-pointer p-1.5 rounded-lg bg-indigo-950/60 border border-indigo-600/50">
+              <span class="text-indigo-200 font-medium">กล้อง Pi + Arduino ×3 &amp; มุมตรวจจับ</span>
+              <input id="chk-cams" type="checkbox" checked class="accent-indigo-400 w-4 h-4" />
+            </label>
+            <label class="flex items-center justify-between gap-2 cursor-pointer p-1.5 rounded-lg hover:bg-slate-800/70">
+              <span>กล่องรับสูง 220 mm (3 กล่อง/9 ช่อง)</span>
+              <input id="chk-bins" type="checkbox" checked class="accent-sky-500 w-4 h-4" />
+            </label>
+            <label class="flex items-center justify-between gap-2 cursor-pointer p-1.5 rounded-lg hover:bg-slate-800/70">
+              <span>มอเตอร์ NEMA17, DC 12V &amp; เซอร์โว</span>
+              <input id="chk-elec" type="checkbox" checked class="accent-sky-500 w-4 h-4" />
+            </label>
+            <label class="flex items-center justify-between gap-2 cursor-pointer p-1.5 rounded-lg bg-sky-950/50 border border-sky-700/40">
+              <span class="text-sky-300 font-medium">เส้นระดับความสูงเท่ากัน (Z=377)</span>
+              <input id="chk-datum" type="checkbox" checked class="accent-sky-400 w-4 h-4" />
+            </label>
+          </div>
+        </div>
+
+        <div class="border-t border-slate-700/80 pt-3">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">ความเร็วจำลอง</span>
+            <span id="speed-val" class="text-sky-300 font-mono">1.0x</span>
+          </div>
+          <input id="sim-speed" type="range" min="0.2" max="2.5" step="0.1" value="1.0" class="w-full accent-sky-500" />
+        </div>
+
+        <div class="border-t border-slate-700/80 pt-3 space-y-2">
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">แชร์เข้า LINE / ส่งออก 3D CAD</div>
+          <button id="btn-save-png-side" type="button" class="btn-cad w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow">
+            บันทึกรูปภาพมุมปัจจุบัน (.PNG) ส่งเข้า LINE
+          </button>
+          <div class="grid grid-cols-2 gap-2">
+            <button id="btn-export-stl" type="button" class="btn-cad py-2 px-3 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs shadow">
+              ดาวน์โหลด .STL
+            </button>
+            <button id="btn-export-obj" type="button" class="btn-cad py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow">
+              ดาวน์โหลด .OBJ
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Specs -->
+      <div id="pane-specs" class="p-3.5 overflow-y-auto custom-scroll flex-1 space-y-3 text-xs hidden">
+        <div class="rounded-lg bg-slate-800/80 p-2.5 border border-slate-700 space-y-1">
+          <div class="font-semibold text-sky-300">มิติหลักฉบับล่าสุด</div>
+          <div class="flex justify-between"><span class="text-slate-400">ความสูงขา 2020 (1 &amp; 2):</span><span class="font-mono text-emerald-300">300 mm เท่ากัน</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">ผิวบนราง / ผิวสายพาน:</span><span class="font-mono text-emerald-300">320 / 377 mm</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">กรวยป้อนต้นสายพาน 1:</span><span class="font-mono text-amber-300">นำออกแล้ว</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">แผ่นเบี่ยงสี S1:</span><span class="font-mono">140 × 50 × 3 mm</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">สายพานสั้น 3 เส้น:</span><span class="font-mono">450 / 700 mm (×2)</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">กล่องรับ 3 กล่อง:</span><span class="font-mono">380 × 260 × 220 mm</span></div>
+        </div>
+        <div class="rounded-lg bg-slate-800/80 p-2.5 border border-slate-700 space-y-1">
+          <div class="font-semibold text-slate-200">การจัดเรียง 3 เลน (มองตามทิศสายพาน)</div>
+          <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-emerald-500"></span><span>ซ้าย (+400): สีเขียว + Arduino Cam 1</span></div>
+          <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-rose-600"></span><span>กลาง (0): สีแดง + Arduino Cam 2</span></div>
+          <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-purple-950 border border-purple-400"></span><span>ขวา (−400): สีดำ + Arduino Cam 3</span></div>
+        </div>
+      </div>
+
+      <!-- Tab 3: Camera System -->
+      <div id="pane-notes" class="p-3.5 overflow-y-auto custom-scroll flex-1 space-y-3 text-xs hidden">
+        <div class="rounded-lg bg-emerald-950/50 border border-emerald-600/50 p-3 space-y-1.5">
+          <div class="font-bold text-emerald-300">กล้อง Raspberry Pi (สายพาน 1)</div>
+          <p class="text-emerald-100/90 leading-relaxed">
+            ติดตั้งด้านข้างสายพาน 1 (X = 350 mm, สูงระดับกลางผล Z ≈ 415 mm) หันเลนส์เข้าด้านข้างผลมังคุดโดยตรง เพื่อตรวจสีผิว (เขียว / แดง / ดำ) โดยไม่ถูกขั้วหรือกลีบเลี้ยงบัง แล้วสั่งเซอร์โว S1 (140 mm)
+          </p>
+        </div>
+        <div class="rounded-lg bg-sky-950/50 border border-sky-600/50 p-3 space-y-1.5">
+          <div class="font-bold text-sky-300">กล้อง Arduino ×3 (สายพาน 2 ทางละ 1 ตัว)</div>
+          <p class="text-sky-100/90 leading-relaxed">
+            ติดตั้งด้านข้างของแต่ละเลนบนสายพาน 2 (เลนซ้าย Y=+400, กลาง Y=0, ขวา Y=−400) ระดับกลางผล Z ≈ 415 mm หันเลนส์เข้าด้านข้างเพื่อเช็คมังคุดและวัดขนาด (เล็ก / กลาง / ใหญ่) โดยไม่ติดขั้ว ก่อนสั่งเซอร์โว S2–S4
+          </p>
+        </div>
+      </div>
+    </aside>
+
+    <div id="toast" class="fixed top-20 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg opacity-0 pointer-events-none transition-opacity duration-300 z-50">
+      พร้อมใช้งาน
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    // CAD (X flow, Y lateral +left/-right, Z height) -> Three.js (X, Y up, Z)
+    const CENTER_X = 1180;
+    function toThree(cx, cy, cz) {
+      return new THREE.Vector3(cx - CENTER_X, cz, -cy);
+    }
+
+    const canvas = document.getElementById('viewport');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputEncoding = THREE.sRGBEncoding;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f172a);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 10, 28000);
+
+    // Lighting
+    const hemiLight = new THREE.HemisphereLight(0xe2e8f0, 0x334155, 0.8);
+    hemiLight.position.set(0, 2200, 0);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.92);
+    dirLight.position.set(1400, 2400, 1500);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.camera.near = 200;
+    dirLight.shadow.camera.far = 6500;
+    const d = 1900;
+    dirLight.shadow.camera.left = -d;
+    dirLight.shadow.camera.right = d;
+    dirLight.shadow.camera.top = d;
+    dirLight.shadow.camera.bottom = -d;
+    scene.add(dirLight);
+
+    const fillLight = new THREE.DirectionalLight(0x93c5fd, 0.35);
+    fillLight.position.set(-1500, 1000, -1300);
+    scene.add(fillLight);
+
+    // Floor Grid
+    const grid = new THREE.GridHelper(4600, 46, 0x38bdf8, 0x1e293b);
+    scene.add(grid);
+
+    const floorMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(5200, 3800),
+      new THREE.ShadowMaterial({ opacity: 0.25 })
+    );
+    floorMesh.rotation.x = -Math.PI / 2;
+    floorMesh.receiveShadow = true;
+    scene.add(floorMesh);
+
+    // Materials
+    const matAlu = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.72, roughness: 0.32 });
+    const matAluHighlight = new THREE.MeshStandardMaterial({ color: 0x34d399, metalness: 0.55, roughness: 0.35 });
+    const matSteel = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.85, roughness: 0.22 });
+    const matRoller = new THREE.MeshStandardMaterial({ color: 0xdbeafe, metalness: 0.65, roughness: 0.28 });
+    const matBearing = new THREE.MeshStandardMaterial({ color: 0x15803d, metalness: 0.4, roughness: 0.5 });
+    const matBeltWhite = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.55, metalness: 0.05 });
+    const matBeltShort = new THREE.MeshStandardMaterial({ color: 0xe0f2fe, roughness: 0.45, metalness: 0.05 });
+    const matBeltTranslucent = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.4, metalness: 0.05, transparent: true, opacity: 0.92 });
+    const matCleat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.8 });
+    const matAcrylicWhite = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.25, transparent: true, opacity: 0.85 });
+    const matAcrylicBlack = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6, metalness: 0.1 });
+    const matHoodPanel = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.75, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
+    const matMilkAcrylic = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xe0f2fe, emissiveIntensity: 0.45, roughness: 0.2 });
+    const matFan = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.35, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
+    const matDiverter = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.3, metalness: 0.1 });
+    const matMotor = new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.5, roughness: 0.4 });
+    const matDCMotor = new THREE.MeshStandardMaterial({ color: 0x0ea5e9, metalness: 0.6, roughness: 0.35 });
+    const matServo = new THREE.MeshStandardMaterial({ color: 0x0284c7, metalness: 0.3, roughness: 0.4 });
+    const matPi = new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.42 });
+    const matArduino = new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.4 });
+    const matLens = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.7, roughness: 0.2 });
+    const matIR = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.4 });
+
+    // Layer Groups
+    const machineRoot = new THREE.Group();
+    machineRoot.name = 'MangosteenSorterV2';
+    scene.add(machineRoot);
+
+    const grpFrame = new THREE.Group();
+    const grpBelts = new THREE.Group();
+    const grpHoods = new THREE.Group();
+    const grpDiverters = new THREE.Group();
+    const grpBins = new THREE.Group();
+    const grpElec = new THREE.Group();
+    const grpCams = new THREE.Group();
+    const grpDatum = new THREE.Group();
+    const grpSim = new THREE.Group();
+
+    machineRoot.add(grpFrame, grpBelts, grpHoods, grpDiverters, grpBins, grpElec, grpCams);
+    scene.add(grpDatum, grpSim);
+
+    function addBox(parent, cx, cy, cz, dx, dy, dz, mat) {
+      const geo = new THREE.BoxGeometry(dx, dz, dy);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(toThree(cx, cy, cz));
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      parent.add(mesh);
+      return mesh;
+    }
+    function addProfileX(parent, x1, x2, cy, cz, mat = matAlu) {
+      return addBox(parent, (x1 + x2) / 2, cy, cz, Math.abs(x2 - x1), 20, 20, mat);
+    }
+    function addProfileY(parent, cx, y1, y2, cz, mat = matAlu) {
+      return addBox(parent, cx, (y1 + y2) / 2, cz, 20, Math.abs(y2 - y1), 20, mat);
+    }
+    function addProfileZ(parent, cx, cy, z1, z2, mat = matAlu) {
+      return addBox(parent, cx, cy, (z1 + z2) / 2, 20, 20, Math.abs(z2 - z1), mat);
+    }
+    function addCylinderY(parent, cx, cy, cz, radius, length, mat) {
+      const geo = new THREE.CylinderGeometry(radius, radius, length, 24);
+      geo.rotateX(Math.PI / 2);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(toThree(cx, cy, cz));
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      parent.add(mesh);
+      return mesh;
+    }
+
+    // Helper: Build Side-Mounted Camera Module + Bracket + Horizontal FOV Detection Cone
+    // Points horizontally in CAD +Y direction (Three.js -Z) across the belt at fruit height
+    function addSideCameraWithCone(parent, cx, cy, cz, pcbMat, coneColor, coneDist, coneRadius) {
+      // Vertical mounting post from rail height (Z = 310) up to camera (cz)
+      addProfileZ(parent, cx, cy - 12, Z_RAIL_TOP - 10, cz + 18, matAlu);
+      // Camera PCB standing vertically facing +Y
+      addBox(parent, cx, cy, cz, 36, 10, 32, pcbMat);
+      // Lens barrel pointing horizontally along +Y (Three.js -Z)
+      const lensGeo = new THREE.CylinderGeometry(8, 9, 16, 18);
+      lensGeo.rotateX(Math.PI / 2);
+      const lens = new THREE.Mesh(lensGeo, matLens);
+      lens.position.copy(toThree(cx, cy + 10, cz));
+      parent.add(lens);
+
+      // Horizontal glowing FOV detection cone pointing toward belt center (+Y / Three.js -Z)
+      // Default Three.js ConeGeometry has apex at +Y and base at -Y.
+      // Rotating X by +PI/2 puts apex at +Z (camera) and base at -Z (CAD +Y, target belt)!
+      const coneGeo = new THREE.ConeGeometry(coneRadius, coneDist, 24, 1, true);
+      coneGeo.rotateX(Math.PI / 2);
+      const coneMat = new THREE.MeshBasicMaterial({
+        color: coneColor,
+        transparent: true,
+        opacity: 0.22,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      });
+      const cone = new THREE.Mesh(coneGeo, coneMat);
+      cone.position.copy(toThree(cx, cy + 16 + coneDist / 2, cz));
+      parent.add(cone);
+
+      // Vertical detection target ring at belt center facing the camera
+      const ringGeo = new THREE.RingGeometry(coneRadius - 3.5, coneRadius, 28);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: coneColor,
+        transparent: true,
+        opacity: 0.72,
+        side: THREE.DoubleSide
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.position.copy(toThree(cx, cy + 16 + coneDist, cz));
+      parent.add(ring);
+    }
+
+    // =========================================================================
+    // 1. CONVEYOR 1 (NO HOPPER! Z_rail_top = 320, Z_belt = 377)
+    // =========================================================================
+    const Z_RAIL_TOP = 320;
+    const Z_SHAFT = 350;
+    const Z_BELT_TOP = 377;
+
+    addProfileX(grpFrame, -50, 650, 110, Z_RAIL_TOP - 10);
+    addProfileX(grpFrame, -50, 650, -110, Z_RAIL_TOP - 10);
+    [-40, 200, 400, 640].forEach(x => addProfileY(grpFrame, x, -100, 100, Z_RAIL_TOP - 30));
+    [-40, 640].forEach(x => [-110, 110].forEach(y => addProfileZ(grpFrame, x, y, 0, 300)));
+
+    [0, 600].forEach((x, idx) => {
+      addCylinderY(grpBelts, x, 0, Z_SHAFT, 25, 140, matRoller);
+      addCylinderY(grpBelts, x, idx === 0 ? 0 : -25, Z_SHAFT, 6, idx === 0 ? 270 : 320, matSteel);
+      [-110, 110].forEach(y => addBox(grpBelts, x, y, Z_RAIL_TOP + 22, 46, 26, 44, matBearing));
+    });
+
+    // NEMA17 Motor on Conv 1 head
+    addCylinderY(grpElec, 600, -195, Z_SHAFT, 10, 28, matSteel);
+    addBox(grpElec, 600, -235, Z_SHAFT, 42, 48, 42, matMotor);
+
+    // Belt 1 (NO feed hopper at start as requested!)
+    addBox(grpBelts, 300, 0, Z_BELT_TOP - 1, 600, 120, 2, matBeltWhite);
+    addBox(grpBelts, 300, 0, Z_SHAFT - 26, 600, 120, 2, matBeltWhite);
+
+    const belt1Cleats = [];
+    for (let i = 0; i < 4; i++) {
+      const cx = 40 + i * 185;
+      belt1Cleats.push({ mesh: addBox(grpBelts, cx, 0, Z_BELT_TOP + 15, 10, 105, 30, matCleat), x: cx });
+    }
+    [-62.5, 62.5].forEach(y => addBox(grpBelts, 300, y, Z_BELT_TOP + 27, 600, 3, 50, matAcrylicWhite));
+    [300, 550].forEach(x => addBox(grpElec, x, 69, Z_BELT_TOP + 30, 18, 10, 14, matIR));
+
+    // Raspberry Pi board on side of Conveyor 1
+    addBox(grpElec, 220, -175, 270, 110, 75, 28, matPi);
+
+    // Hood 1 + Raspberry Pi Camera (Color Detection)
+    [190, 510].forEach(x => [-110, 110].forEach(y => addProfileZ(grpHoods, x, y, Z_RAIL_TOP, Z_RAIL_TOP + 300)));
+    [190, 510].forEach(x => addProfileY(grpHoods, x, -120, 120, 630));
+    [-110, 110].forEach(y => addProfileX(grpHoods, 180, 520, y, 630));
+    addProfileY(grpHoods, 350, -100, 100, 630);
+    addBox(grpHoods, 350, 0, 595, 300, 160, 3, matMilkAcrylic);
+
+    // Side-mounted Raspberry Pi Camera at X=350, Y=-145, Z=415 pointing horizontally across Belt 1
+    addSideCameraWithCone(grpCams, 350, -145, 415, matPi, 0x10b981, 130, 44);
+
+    const hoodPanels = [];
+    function addHoodPanel(cx, cy, cz, dx, dy, dz) {
+      const m = addBox(grpHoods, cx, cy, cz, dx, dy, dz, matHoodPanel);
+      hoodPanels.push(m);
+      return m;
+    }
+    addHoodPanel(350, 121, 508, 320, 4, 260);
+    addHoodPanel(350, -121, 508, 320, 4, 260);
+    addHoodPanel(350, 0, 642, 320, 240, 4);
+    addHoodPanel(190, 0, 548, 4, 240, 182);
+    addHoodPanel(510, 0, 548, 4, 240, 182);
+
+    // =========================================================================
+    // 2. DIVERTER S1 (140 mm) & 3 SHORT DRIVEN TRANSFER BELTS (120 mm wide)
+    // Center: 450 mm (0°), Left & Right: 700 mm (±45°), each with 12V DC gear motor
+    // =========================================================================
+    addBox(grpElec, 600, 0, Z_BELT_TOP - 32, 40, 22, 40, matServo);
+    const s1Pivot = new THREE.Group();
+    s1Pivot.position.copy(toThree(600, 0, Z_BELT_TOP));
+    grpDiverters.add(s1Pivot);
+    const s1BladeGeo = new THREE.BoxGeometry(140, 50, 3);
+    s1BladeGeo.translate(70, 25, 0);
+    const s1Blade = new THREE.Mesh(s1BladeGeo, matDiverter);
+    s1Blade.castShadow = true;
+    s1Pivot.add(s1Blade);
+
+    function addShortBelt(startX, startY, endX, endY) {
+      const p1 = toThree(startX, startY, Z_BELT_TOP);
+      const p2 = toThree(endX, endY, Z_BELT_TOP);
+      const dir = new THREE.Vector3().subVectors(p2, p1);
+      const len = dir.length();
+      const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+      const yaw = Math.atan2(-dir.z, dir.x); // rotation around Three.js Y
+
+      const g = new THREE.Group();
+      g.position.set(mid.x, 0, mid.z);
+      g.rotation.y = yaw;
+      grpDiverters.add(g);
+
+      // Belt top & bottom
+      const bTop = new THREE.Mesh(new THREE.BoxGeometry(len, 4, 120), matBeltShort);
+      bTop.position.set(0, Z_BELT_TOP - 2, 0);
+      bTop.castShadow = true;
+      bTop.receiveShadow = true;
+      g.add(bTop);
+
+      // Side aluminum rails
+      [-70, 70].forEach(rz => {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 20, 20), matAlu);
+        rail.position.set(0, Z_RAIL_TOP - 10, rz);
+        rail.castShadow = true;
+        g.add(rail);
+      });
+
+      // Side acrylic guide walls (50 mm tall)
+      [-63, 63].forEach(wz => {
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(len, 50, 3), matAcrylicWhite);
+        wall.position.set(0, Z_BELT_TOP + 27, wz);
+        g.add(wall);
+      });
+
+      // 4 legs (300 mm)
+      [-len / 2 + 35, len / 2 - 35].forEach(lx => {
+        [-70, 70].forEach(lz => {
+          const leg = new THREE.Mesh(new THREE.BoxGeometry(20, 300, 20), matAluHighlight);
+          leg.position.set(lx, 150, lz);
+          leg.castShadow = true;
+          g.add(leg);
+        });
+      });
+
+      // Head & tail rollers (Ø44)
+      [-len / 2, len / 2].forEach(rx => {
+        const rGeo = new THREE.CylinderGeometry(22, 22, 130, 18);
+        rGeo.rotateX(Math.PI / 2);
+        const roller = new THREE.Mesh(rGeo, matRoller);
+        roller.position.set(rx, Z_BELT_TOP - 24, 0);
+        g.add(roller);
+      });
+
+      // Independent 12V DC Gear Motor mounted on head roller side
+      const mGeo = new THREE.CylinderGeometry(19, 19, 68, 16);
+      mGeo.rotateX(Math.PI / 2);
+      const motor = new THREE.Mesh(mGeo, matDCMotor);
+      motor.position.set(len / 2 - 15, Z_BELT_TOP - 24, 108);
+      motor.castShadow = true;
+      g.add(motor);
+    }
+
+    // Center short belt: 450 mm (X = 755 -> 1205, Y = 0)
+    addShortBelt(755, 0, 1205, 0);
+    // Left & Right short belts: ~700 mm angled toward ±400 mm lanes of Conveyor 2
+    addShortBelt(715, 55, 1210, 400);
+    addShortBelt(715, -55, 1210, -400);
+
+    // =========================================================================
+    // 3. CONVEYOR 2 (Equal Height Z_belt = 377, Legs = 300, 3 ARDUINO CAMERAS!)
+    // =========================================================================
+    const X2_OFF = 1220;
+    addProfileX(grpFrame, X2_OFF - 50, X2_OFF + 850, 510, Z_RAIL_TOP - 10);
+    addProfileX(grpFrame, X2_OFF - 50, X2_OFF + 850, -510, Z_RAIL_TOP - 10);
+    [-40, 840].forEach(xp => addProfileY(grpFrame, X2_OFF + xp, -500, 500, Z_RAIL_TOP - 30));
+    [120, 480].forEach(xp => {
+      addProfileY(grpFrame, X2_OFF + xp, -500, 500, Z_RAIL_TOP + 40);
+      [-510, 510].forEach(y => addProfileZ(grpFrame, X2_OFF + xp, y, Z_RAIL_TOP, Z_RAIL_TOP + 30));
+    });
+    // 300 mm legs matching Conveyor 1
+    [-40, 840].forEach(xp => [-510, 510].forEach(y => addProfileZ(grpFrame, X2_OFF + xp, y, 0, 300, matAluHighlight)));
+
+    [0, 800].forEach((xp, idx) => {
+      addCylinderY(grpBelts, X2_OFF + xp, 0, Z_SHAFT, 25, 960, matRoller);
+      addCylinderY(grpBelts, X2_OFF + xp, idx === 0 ? 0 : -25, Z_SHAFT, 10, idx === 0 ? 1090 : 1140, matSteel);
+      [-510, 510].forEach(y => addBox(grpBelts, X2_OFF + xp, y, Z_RAIL_TOP + 24, 52, 30, 48, matBearing));
+    });
+
+    addCylinderY(grpElec, X2_OFF + 800, -590, Z_SHAFT, 12, 32, matSteel);
+    addBox(grpElec, X2_OFF + 800, -635, Z_SHAFT, 42, 48, 42, matMotor);
+
+    const LANES_Y = [400, 0, -400];
+    const laneConeColors = [0x22c55e, 0xf43f5e, 0xa855f7]; // Green, Red, Purple-Black
+
+    LANES_Y.forEach((ly, idx) => {
+      addBox(grpBelts, X2_OFF + 400, ly, Z_BELT_TOP - 1, 800, 120, 2, matBeltTranslucent);
+      addBox(grpBelts, X2_OFF + 400, ly, Z_SHAFT - 26, 800, 120, 2, matBeltTranslucent);
+      addBox(grpBelts, X2_OFF + 415, ly + 63.5, Z_BELT_TOP + 27, 750, 3, 50, matAcrylicBlack);
+      addBox(grpBelts, X2_OFF + 415, ly - 63.5, Z_BELT_TOP + 27, 750, 3, 50, matAcrylicBlack);
+      addBox(grpHoods, X2_OFF + 300, ly, Z_BELT_TOP - 4, 400, 140, 3, matMilkAcrylic);
+      addBox(grpElec, X2_OFF + 220, ly + 70, Z_BELT_TOP + 30, 18, 10, 14, matIR);
+
+      // Side-mounted ARDUINO CAMERA (1 per lane = 3 total!) beside each lane at Y = ly - 135, Z = 415
+      addSideCameraWithCone(grpCams, X2_OFF + 300, ly - 135, 415, matArduino, laneConeColors[idx], 120, 42);
+    });
+
+    // Cross support bar under side-mounted Arduino camera posts at X' = 300, Z = 310
+    addProfileY(grpCams, X2_OFF + 300, -550, 500, Z_RAIL_TOP - 10, matAlu);
+
+    // 2 Lane Bridge Beams
+    [50, 750].forEach(xp => {
+      [-510, 510].forEach(y => addProfileZ(grpFrame, X2_OFF + xp, y, Z_RAIL_TOP, Z_RAIL_TOP + 150));
+      addProfileY(grpFrame, X2_OFF + xp, -500, 500, Z_RAIL_TOP + 160);
+    });
+
+    // Arduino controller box on side of Conveyor 2
+    addBox(grpElec, X2_OFF + 350, -575, 270, 140, 85, 35, matArduino);
+
+    // Hood 2 Frame & Panels
+    [80, 520].forEach(xp => [-510, 510].forEach(y => addProfileZ(grpHoods, X2_OFF + xp, y, Z_RAIL_TOP, Z_RAIL_TOP + 490)));
+    [80, 520].forEach(xp => addProfileY(grpHoods, X2_OFF + xp, -520, 520, 820));
+    [-510, 510].forEach(y => addProfileX(grpHoods, X2_OFF + 70, X2_OFF + 530, y, 820));
+    addHoodPanel(X2_OFF + 300, 521, 604, 440, 4, 452);
+    addHoodPanel(X2_OFF + 300, -521, 604, 440, 4, 452);
+    addHoodPanel(X2_OFF + 300, 0, 832, 440, 1040, 4);
+    addHoodPanel(X2_OFF + 80, 0, 644, 4, 1040, 374);
+    addHoodPanel(X2_OFF + 520, 0, 644, 4, 1040, 374);
+
+    // =========================================================================
+    // 4. SIZE DIVERTERS S2–S4, FAN RAMPS & 3 RECEIVING BOXES (HEIGHT 220 mm ON FLOOR!)
+    // =========================================================================
+    const sizePivots = [];
+    const laneColors = [0x10b981, 0xe11d48, 0x6b21a8];
+
+    LANES_Y.forEach((ly, idx) => {
+      addBox(grpElec, X2_OFF + 830, ly, Z_BELT_TOP - 32, 40, 22, 40, matServo);
+      const pivot = new THREE.Group();
+      pivot.position.copy(toThree(X2_OFF + 830, ly, Z_BELT_TOP));
+      grpDiverters.add(pivot);
+      const bGeo = new THREE.BoxGeometry(160, 50, 3);
+      bGeo.translate(80, 25, 0);
+      pivot.add(new THREE.Mesh(bGeo, matDiverter));
+      sizePivots.push(pivot);
+
+      // Fan Ramp
+      const fanGroup = new THREE.Group();
+      fanGroup.position.copy(toThree(X2_OFF + 800, ly, Z_BELT_TOP));
+      fanGroup.rotation.z = -THREE.MathUtils.degToRad(20);
+      grpDiverters.add(fanGroup);
+
+      const fanShape = new THREE.Shape();
+      const R = 350;
+      fanShape.moveTo(0, 0);
+      fanShape.absarc(0, 0, R, -THREE.MathUtils.degToRad(30), THREE.MathUtils.degToRad(30), false);
+      fanShape.lineTo(0, 0);
+      const fanGeo = new THREE.ExtrudeGeometry(fanShape, { depth: 3, bevelEnabled: false });
+      fanGeo.rotateX(Math.PI / 2);
+      fanGroup.add(new THREE.Mesh(fanGeo, matFan));
+
+      [-30, 30].forEach(deg => {
+        const rad = THREE.MathUtils.degToRad(deg);
+        const wMesh = new THREE.Mesh(new THREE.BoxGeometry(R, 40, 3), matAcrylicBlack);
+        wMesh.position.set((R / 2) * Math.cos(rad), 20, -(R / 2) * Math.sin(rad));
+        wMesh.rotation.y = rad;
+        fanGroup.add(wMesh);
+      });
+      [-10, 10].forEach(deg => {
+        const rad = THREE.MathUtils.degToRad(deg);
+        const dMesh = new THREE.Mesh(new THREE.BoxGeometry(80, 40, 3), matAcrylicBlack);
+        dMesh.position.set(310 * Math.cos(rad), 20, -310 * Math.sin(rad));
+        dMesh.rotation.y = rad;
+        fanGroup.add(dMesh);
+      });
+
+      // Receiving Box: 380 x 260 x 220 mm sitting directly on floor (Z = 0..220)
+      const boxCx = X2_OFF + 1180;
+      const boxH = 220;
+      const boxMat = new THREE.MeshStandardMaterial({
+        color: laneColors[idx],
+        roughness: 0.45,
+        transparent: true,
+        opacity: 0.85
+      });
+      addBox(grpBins, boxCx, ly, 4, 260, 380, 8, boxMat);
+      addBox(grpBins, boxCx - 128, ly, boxH / 2, 4, 380, boxH, boxMat);
+      addBox(grpBins, boxCx + 128, ly, boxH / 2, 4, 380, boxH, boxMat);
+      [-188, -63, 63, 188].forEach(dy => addBox(grpBins, boxCx, ly + dy, boxH / 2, 260, 4, boxH, boxMat));
+    });
+
+    // Equal-Height Datum Line (Z = 377 mm)
+    const datumPts = [toThree(-100, -560, Z_BELT_TOP), toThree(2100, -560, Z_BELT_TOP)];
+    grpDatum.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(datumPts), new THREE.LineBasicMaterial({ color: 0x38bdf8 })));
+    const ribbonGeo = new THREE.PlaneGeometry(2200, 1120);
+    ribbonGeo.rotateX(-Math.PI / 2);
+    const ribbon = new THREE.Mesh(ribbonGeo, new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.06, side: THREE.DoubleSide, depthWrite: false }));
+    ribbon.position.copy(toThree(1000, 0, Z_BELT_TOP + 1));
+    grpDatum.add(ribbon);
+
+    // =========================================================================
+    // 5. LIVE SORTING SIMULATION
+    // =========================================================================
+    const fruitSpecs = [
+      { colorName: 'เขียว', laneIdx: 0, laneY: 400, s1Deg: 42, hex: 0x22c55e },
+      { colorName: 'แดง',  laneIdx: 1, laneY: 0,   s1Deg: 0,  hex: 0xdc2626 },
+      { colorName: 'ดำ',   laneIdx: 2, laneY: -400, s1Deg: -42, hex: 0x2e1065 }
+    ];
+    const sizeSpecs = [
+      { code: 'S', dia: 45, s2Deg: 18, binOffsetY: 125 },
+      { code: 'M', dia: 55, s2Deg: 0,  binOffsetY: 0 },
+      { code: 'L', dia: 65, s2Deg: -18, binOffsetY: -125 }
+    ];
+    const fruits = [];
+    let spawnTimer = 0, simRunning = true, simSpeed = 1.0, fruitCounter = 0;
+    const simStatusEl = document.getElementById('sim-status');
+
+    function spawnMangosteen() {
+      const cSpec = fruitSpecs[fruitCounter % 3];
+      const sSpec = sizeSpecs[Math.floor(fruitCounter / 3) % 3];
+      fruitCounter++;
+      const r = sSpec.dia / 2;
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(r, 16, 14),
+        new THREE.MeshStandardMaterial({ color: cSpec.hex, roughness: 0.45 })
+      );
+      mesh.castShadow = true;
+      const calyx = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.35, r * 0.45, 5, 6), new THREE.MeshStandardMaterial({ color: 0x15803d }));
+      calyx.position.y = r - 1;
+      mesh.add(calyx);
+      grpSim.add(mesh);
+      fruits.push({ mesh, cSpec, sSpec, r, t: 0 });
+    }
+
+    function updateSimulation(dt) {
+      if (!simRunning) return;
+      const sDt = dt * simSpeed;
+      belt1Cleats.forEach(c => {
+        c.x += 150 * sDt;
+        if (c.x > 590) c.x -= 600;
+        c.mesh.position.x = c.x - CENTER_X;
+      });
+      spawnTimer += sDt;
+      if (spawnTimer >= 1.5) { spawnTimer = 0; spawnMangosteen(); }
+
+      let targetS1 = 0;
+      const targetS2 = [0, 0, 0];
+
+      for (let i = fruits.length - 1; i >= 0; i--) {
+        const f = fruits[i];
+        f.t += sDt;
+        let cx = 20, cy = 0, cz = Z_BELT_TOP + f.r;
+        if (f.t < 3.8) {
+          const p = f.t / 3.8;
+          cx = 20 + p * 580;
+          if (cx > 480) targetS1 = f.cSpec.s1Deg;
+        } else if (f.t < 5.4) {
+          const p = (f.t - 3.8) / 1.6;
+          cx = 600 + p * 620;
+          cy = p * f.cSpec.laneY;
+          targetS1 = f.cSpec.s1Deg;
+        } else if (f.t < 8.5) {
+          const p = (f.t - 5.4) / 3.1;
+          cx = X2_OFF + p * 830;
+          cy = f.cSpec.laneY;
+          if (cx > X2_OFF + 650) targetS2[f.cSpec.laneIdx] = f.sSpec.s2Deg;
+        } else if (f.t < 9.4) {
+          const p = (f.t - 8.5) / 0.9;
+          cx = X2_OFF + 830 + p * 320;
+          cy = f.cSpec.laneY + p * f.sSpec.binOffsetY;
+          cz = Z_BELT_TOP + f.r - p * 120;
+          targetS2[f.cSpec.laneIdx] = f.sSpec.s2Deg;
+        } else if (f.t < 9.95) {
+          const p = (f.t - 9.4) / 0.55;
+          cx = X2_OFF + 1180;
+          cy = f.cSpec.laneY + f.sSpec.binOffsetY;
+          cz = (Z_BELT_TOP + f.r - 120) - p * 150;
+          simStatusEl.textContent = `Pi Cam: ${f.cSpec.colorName} → Arduino Cam #${f.cSpec.laneIdx + 1}: ไซส์ ${f.sSpec.code}`;
+        } else {
+          grpSim.remove(f.mesh);
+          f.mesh.geometry.dispose();
+          fruits.splice(i, 1);
+          continue;
+        }
+        f.mesh.position.copy(toThree(cx, cy, cz));
+      }
+
+      s1Pivot.rotation.y += (THREE.MathUtils.degToRad(targetS1) - s1Pivot.rotation.y) * Math.min(1, sDt * 10);
+      sizePivots.forEach((pv, idx) => {
+        pv.rotation.y += (THREE.MathUtils.degToRad(targetS2[idx]) - pv.rotation.y) * Math.min(1, sDt * 10);
+      });
+    }
+
+    // =========================================================================
+    // 6. ROCK-SOLID ORBIT / PAN / ZOOM CONTROLLER (Mouse + Touch + Keys)
+    // =========================================================================
+    function getFitRadius(baseRadius) {
+      const aspect = Math.max(0.45, (window.innerWidth || 800) / Math.max(1, window.innerHeight || 600));
+      const factor = aspect < 1.35 ? (1.35 / aspect) : 1.0;
+      return Math.round(baseRadius * Math.min(2.4, factor));
+    }
+
+    const orbit = {
+      target: new THREE.Vector3(60, 360, 0),
+      radius: getFitRadius(4100),
+      theta: 0.72,
+      phi: 1.05,
+      dragging: false,
+      panning: false,
+      panModeToggle: false,
+      lastX: 0, lastY: 0, pinchDist: 0, touchMidX: 0, touchMidY: 0
+    };
+
+    function updateCamera() {
+      orbit.phi = Math.max(0.06, Math.min(Math.PI / 2 - 0.02, orbit.phi));
+      orbit.radius = Math.max(500, Math.min(13000, orbit.radius));
+      const sinPhi = Math.sin(orbit.phi);
+      camera.position.set(
+        orbit.target.x + orbit.radius * sinPhi * Math.sin(orbit.theta),
+        orbit.target.y + orbit.radius * Math.cos(orbit.phi),
+        orbit.target.z + orbit.radius * sinPhi * Math.cos(orbit.theta)
+      );
+      camera.lookAt(orbit.target);
+    }
+
+    function applyPan(dx, dy) {
+      const panSpeed = orbit.radius * 0.0013;
+      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
+      const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
+      orbit.target.addScaledVector(right, -dx * panSpeed);
+      orbit.target.addScaledVector(up, dy * panSpeed);
+    }
+
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    canvas.addEventListener('mousedown', e => {
+      e.preventDefault();
+      orbit.dragging = true;
+      orbit.panning = (e.button === 2 || e.button === 1 || e.shiftKey || orbit.panModeToggle);
+      orbit.lastX = e.clientX;
+      orbit.lastY = e.clientY;
+    });
+    window.addEventListener('mousemove', e => {
+      if (!orbit.dragging) return;
+      const dx = e.clientX - orbit.lastX, dy = e.clientY - orbit.lastY;
+      orbit.lastX = e.clientX; orbit.lastY = e.clientY;
+      if (orbit.panning) applyPan(dx, dy);
+      else { orbit.theta -= dx * 0.0075; orbit.phi -= dy * 0.0075; }
+      updateCamera();
+    });
+    window.addEventListener('mouseup', () => { orbit.dragging = false; orbit.panning = false; });
+    canvas.addEventListener('wheel', e => {
+      e.preventDefault();
+      orbit.radius *= e.deltaY > 0 ? 1.12 : 0.89;
+      updateCamera();
+    }, { passive: false });
+
+    canvas.addEventListener('touchstart', e => {
+      if (e.touches.length === 1) {
+        orbit.dragging = true; orbit.panning = orbit.panModeToggle;
+        orbit.lastX = e.touches[0].clientX; orbit.lastY = e.touches[0].clientY;
+      } else if (e.touches.length === 2) {
+        orbit.dragging = false;
+        orbit.pinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        orbit.touchMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        orbit.touchMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      }
+    }, { passive: true });
+    canvas.addEventListener('touchmove', e => {
+      e.preventDefault();
+      if (e.touches.length === 1 && orbit.dragging) {
+        const dx = e.touches[0].clientX - orbit.lastX, dy = e.touches[0].clientY - orbit.lastY;
+        orbit.lastX = e.touches[0].clientX; orbit.lastY = e.touches[0].clientY;
+        if (orbit.panning) applyPan(dx, dy);
+        else { orbit.theta -= dx * 0.008; orbit.phi -= dy * 0.008; }
+        updateCamera();
+      } else if (e.touches.length === 2) {
+        const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        if (orbit.pinchDist > 0 && dist > 0) orbit.radius *= (orbit.pinchDist / dist);
+        applyPan(midX - orbit.touchMidX, midY - orbit.touchMidY);
+        orbit.pinchDist = dist; orbit.touchMidX = midX; orbit.touchMidY = midY;
+        updateCamera();
+      }
+    }, { passive: false });
+    canvas.addEventListener('touchend', e => { if (e.touches.length === 0) { orbit.dragging = false; orbit.pinchDist = 0; } }, { passive: true });
+
+    window.addEventListener('keydown', e => {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+      if (e.key === '+' || e.key === '=') { orbit.radius *= 0.85; updateCamera(); }
+      else if (e.key === '-' || e.key === '_') { orbit.radius *= 1.18; updateCamera(); }
+      else if (e.key === 'ArrowLeft') { orbit.theta += 0.12; updateCamera(); }
+      else if (e.key === 'ArrowRight') { orbit.theta -= 0.12; updateCamera(); }
+      else if (e.key === 'ArrowUp') { orbit.phi -= 0.08; updateCamera(); }
+      else if (e.key === 'ArrowDown') { orbit.phi += 0.08; updateCamera(); }
+    });
+
+    // =========================================================================
+    // 7. UI BUTTONS, PNG SNAPSHOT FOR LINE & STL/OBJ EXPORTERS
+    // =========================================================================
+    const viewButtons = ['view-iso', 'view-side', 'view-top', 'view-front'];
+    function setActiveViewBtn(id) {
+      viewButtons.forEach(b => document.getElementById(b).classList.toggle('active', b === id));
+    }
+    function setIsoView() {
+      orbit.target.set(60, 360, 0); orbit.radius = getFitRadius(4100); orbit.theta = 0.72; orbit.phi = 1.05;
+      updateCamera(); setActiveViewBtn('view-iso');
+    }
+    document.getElementById('view-iso').addEventListener('click', setIsoView);
+    document.getElementById('btn-fit').addEventListener('click', setIsoView);
+    document.getElementById('view-side').addEventListener('click', () => {
+      orbit.target.set(60, 380, 0); orbit.radius = getFitRadius(4200); orbit.theta = 0.0; orbit.phi = Math.PI / 2 - 0.03;
+      updateCamera(); setActiveViewBtn('view-side');
+    });
+    document.getElementById('view-top').addEventListener('click', () => {
+      orbit.target.set(60, 350, 0); orbit.radius = getFitRadius(4300); orbit.theta = 0.001; orbit.phi = 0.09;
+      updateCamera(); setActiveViewBtn('view-top');
+    });
+    document.getElementById('view-front').addEventListener('click', () => {
+      orbit.target.set(60, 380, 0); orbit.radius = getFitRadius(3800); orbit.theta = Math.PI / 2; orbit.phi = 1.32;
+      updateCamera(); setActiveViewBtn('view-front');
+    });
+    document.getElementById('btn-zoom-in').addEventListener('click', () => { orbit.radius *= 0.82; updateCamera(); });
+    document.getElementById('btn-zoom-out').addEventListener('click', () => { orbit.radius *= 1.22; updateCamera(); });
+
+    const panModeBtn = document.getElementById('btn-pan-mode');
+    panModeBtn.addEventListener('click', () => {
+      orbit.panModeToggle = !orbit.panModeToggle;
+      panModeBtn.textContent = orbit.panModeToggle ? 'โหมด: เลื่อนฉาก' : 'โหมด: หมุน';
+      panModeBtn.classList.toggle('active', orbit.panModeToggle);
+    });
+
+    const panelEl = document.getElementById('inspector-panel');
+    const toggleBtn = document.getElementById('btn-toggle-panel');
+    toggleBtn.addEventListener('click', () => {
+      const hidden = panelEl.classList.toggle('hidden');
+      toggleBtn.textContent = hidden ? 'แสดงแผงควบคุม' : 'ซ่อนแผงควบคุม';
+    });
+
+    const tabs = [
+      { btn: 'tab-layers', pane: 'pane-layers' },
+      { btn: 'tab-specs', pane: 'pane-specs' },
+      { btn: 'tab-notes', pane: 'pane-notes' }
+    ];
+    tabs.forEach(t => {
+      document.getElementById(t.btn).addEventListener('click', () => {
+        tabs.forEach(o => {
+          const active = o.btn === t.btn;
+          document.getElementById(o.btn).className = active
+            ? 'py-2.5 text-center text-sky-400 border-b-2 border-sky-400 bg-slate-800/60'
+            : 'py-2.5 text-center text-slate-400 hover:text-slate-200 border-b-2 border-transparent';
+          document.getElementById(o.pane).classList.toggle('hidden', !active);
+        });
+      });
+    });
+
+    [
+      ['chk-frame', grpFrame], ['chk-belts', grpBelts], ['chk-hoods', grpHoods],
+      ['chk-diverters', grpDiverters], ['chk-bins', grpBins], ['chk-elec', grpElec],
+      ['chk-cams', grpCams], ['chk-datum', grpDatum]
+    ].forEach(([id, grp]) => {
+      document.getElementById(id).addEventListener('change', e => { grp.visible = e.target.checked; });
+    });
+
+    let hoodState = 0;
+    const hoodBtn = document.getElementById('btn-hood-mode');
+    hoodBtn.addEventListener('click', () => {
+      hoodState = (hoodState + 1) % 3;
+      if (hoodState === 0) { matHoodPanel.opacity = 0.3; matHoodPanel.transparent = true; hoodPanels.forEach(p => { p.visible = true; }); hoodBtn.textContent = 'ฮูด: โปร่งใส'; }
+      else if (hoodState === 1) { matHoodPanel.opacity = 1.0; matHoodPanel.transparent = false; hoodPanels.forEach(p => { p.visible = true; }); hoodBtn.textContent = 'ฮูด: ทึบแสง'; }
+      else { hoodPanels.forEach(p => { p.visible = false; }); hoodBtn.textContent = 'ฮูด: ซ่อนผนัง'; }
+      matHoodPanel.needsUpdate = true;
+    });
+
+    const simBtn = document.getElementById('btn-sim-toggle');
+    simBtn.addEventListener('click', () => {
+      simRunning = !simRunning;
+      simBtn.textContent = simRunning ? 'หยุดจำลอง' : 'เริ่มจำลอง';
+      simBtn.classList.toggle('bg-emerald-600', simRunning);
+      simBtn.classList.toggle('bg-slate-700', !simRunning);
+    });
+    const speedInput = document.getElementById('sim-speed');
+    speedInput.addEventListener('input', () => {
+      simSpeed = parseFloat(speedInput.value);
+      document.getElementById('speed-val').textContent = simSpeed.toFixed(1) + 'x';
+    });
+
+    const toastEl = document.getElementById('toast');
+    let toastTimer = null;
+    function showToast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.remove('opacity-0');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toastEl.classList.add('opacity-0'), 2800);
+    }
+
+    function savePngForLine() {
+      renderer.render(scene, camera);
+      const url = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'mangosteen_sorter_3d_cad.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('บันทึกรูปภาพ PNG เรียบร้อย — ส่งเข้ากลุ่ม LINE ได้เลย!');
+    }
+    document.getElementById('btn-save-png').addEventListener('click', savePngForLine);
+    document.getElementById('btn-save-png-side').addEventListener('click', savePngForLine);
+
+    function downloadTextFile(filename, content, mime) {
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    function threeToCadVec(v) { return new THREE.Vector3(v.x + CENTER_X, -v.z, v.y); }
+
+    document.getElementById('btn-export-stl').addEventListener('click', () => {
+      machineRoot.updateMatrixWorld(true);
+      const lines = ['solid mangosteen_sorter_v2'];
+      const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
+      const cb = new THREE.Vector3(), ab = new THREE.Vector3();
+      machineRoot.traverse(obj => {
+        if (!obj.isMesh || !obj.visible) return;
+        let p = obj.parent; while (p) { if (!p.visible) return; p = p.parent; }
+        const pos = obj.geometry.attributes.position; if (!pos) return;
+        const idx = obj.geometry.index;
+        const n = idx ? idx.count / 3 : pos.count / 3;
+        for (let i = 0; i < n; i++) {
+          const i0 = idx ? idx.getX(i * 3) : i * 3, i1 = idx ? idx.getX(i * 3 + 1) : i * 3 + 1, i2 = idx ? idx.getX(i * 3 + 2) : i * 3 + 2;
+          const cA = threeToCadVec(vA.fromBufferAttribute(pos, i0).applyMatrix4(obj.matrixWorld));
+          const cB = threeToCadVec(vB.fromBufferAttribute(pos, i1).applyMatrix4(obj.matrixWorld));
+          const cC = threeToCadVec(vC.fromBufferAttribute(pos, i2).applyMatrix4(obj.matrixWorld));
+          cb.subVectors(cC, cB).cross(ab.subVectors(cA, cB)).normalize();
+          lines.push(`facet normal ${cb.x.toFixed(5)} ${cb.y.toFixed(5)} ${cb.z.toFixed(5)}`, '  outer loop',
+            `    vertex ${cA.x.toFixed(2)} ${cA.y.toFixed(2)} ${cA.z.toFixed(2)}`,
+            `    vertex ${cB.x.toFixed(2)} ${cB.y.toFixed(2)} ${cB.z.toFixed(2)}`,
+            `    vertex ${cC.x.toFixed(2)} ${cC.y.toFixed(2)} ${cC.z.toFixed(2)}`, '  endloop', 'endfacet');
+        }
+      });
+      lines.push('endsolid mangosteen_sorter_v2');
+      downloadTextFile('mangosteen_sorter_v2_mm.stl', lines.join('\n'), 'application/sla');
+      showToast('ส่งออกไฟล์ .STL เรียบร้อย');
+    });
+
+    document.getElementById('btn-export-obj').addEventListener('click', () => {
+      machineRoot.updateMatrixWorld(true);
+      const lines = ['# Mangosteen Sorter V2 (mm)'];
+      let vOff = 1, mIdx = 0;
+      const v = new THREE.Vector3();
+      machineRoot.traverse(obj => {
+        if (!obj.isMesh || !obj.visible) return;
+        let p = obj.parent; while (p) { if (!p.visible) return; p = p.parent; }
+        const pos = obj.geometry.attributes.position; if (!pos) return;
+        lines.push(`o part_${++mIdx}`);
+        for (let i = 0; i < pos.count; i++) {
+          const cv = threeToCadVec(v.fromBufferAttribute(pos, i).applyMatrix4(obj.matrixWorld));
+          lines.push(`v ${cv.x.toFixed(2)} ${cv.y.toFixed(2)} ${cv.z.toFixed(2)}`);
+        }
+        const idx = obj.geometry.index;
+        if (idx) { for (let i = 0; i < idx.count; i += 3) lines.push(`f ${idx.getX(i)+vOff} ${idx.getX(i+1)+vOff} ${idx.getX(i+2)+vOff}`); }
+        else { for (let i = 0; i < pos.count; i += 3) lines.push(`f ${i+vOff} ${i+1+vOff} ${i+2+vOff}`); }
+        vOff += pos.count;
+      });
+      downloadTextFile('mangosteen_sorter_v2_mm.obj', lines.join('\n'), 'text/plain');
+      showToast('ส่งออกไฟล์ .OBJ เรียบร้อย');
+    });
+
+    function handleResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    window.addEventListener('resize', handleResize);
+    if (window.innerWidth < 768) { panelEl.classList.add('hidden'); toggleBtn.textContent = 'แสดงแผงควบคุม'; }
+    handleResize();
+    updateCamera();
+    spawnMangosteen();
+
+    let lastTime = performance.now();
+    function animate(now) {
+      requestAnimationFrame(animate);
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+      updateSimulation(dt);
+      renderer.render(scene, camera);
+    }
+    requestAnimationFrame(animate);
+  })();
+  </script>
+</body>
+</html>
